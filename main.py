@@ -1,9 +1,38 @@
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
+import os
+import urllib.request
+import zipfile
 import numpy as np
 from sklearn.neighbors import BallTree
 
-# === Load GeoNames ===
+# === Setup paths ===
+GEONAMES_DIR = "/tmp/geonames"
+ALL_COUNTRIES_FILE = os.path.join(GEONAMES_DIR, "allCountries.txt")
+COUNTRY_INFO_FILE = os.path.join(GEONAMES_DIR, "countryInfo.txt")
+
+# === Auto-download files if needed ===
+def download_if_needed():
+    os.makedirs(GEONAMES_DIR, exist_ok=True)
+    if not os.path.exists(ALL_COUNTRIES_FILE):
+        print("📦 Downloading allCountries.txt...")
+        urllib.request.urlretrieve(
+            "http://download.geonames.org/export/dump/allCountries.zip",
+            f"{GEONAMES_DIR}/allCountries.zip"
+        )
+        with zipfile.ZipFile(f"{GEONAMES_DIR}/allCountries.zip", "r") as zip_ref:
+            zip_ref.extractall(GEONAMES_DIR)
+
+    if not os.path.exists(COUNTRY_INFO_FILE):
+        print("📦 Downloading countryInfo.txt...")
+        urllib.request.urlretrieve(
+            "http://download.geonames.org/export/dump/countryInfo.txt",
+            COUNTRY_INFO_FILE
+        )
+
+download_if_needed()
+
+# === Load files ===
 def load_geonames(file_path):
     coords = []
     names = []
@@ -36,15 +65,9 @@ def load_country_names(file_path):
                 country_map[country_code] = country_name
     return country_map
 
-# === Initialize once ===
-coords, name_data = load_geonames("/Users/hudsonrha/Documents/allCountries.txt")
-tree = BallTree(coords, metric='haversine')
-country_map = load_country_names("/Users/hudsonrha/Documents/countryInfo.txt")
-
-# === FastAPI setup ===
+# === Initialize FastAPI ===
 app = FastAPI()
 
-# Allow all CORS for testing with Expo
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -52,6 +75,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+print("🚀 Loading GeoNames data...")
+coords, name_data = load_geonames(ALL_COUNTRIES_FILE)
+tree = BallTree(coords, metric='haversine')
+country_map = load_country_names(COUNTRY_INFO_FILE)
+print("✅ GeoNames data loaded")
+
+# === API ===
 @app.get("/reverse")
 def reverse_geocode(lat: float = Query(...), lon: float = Query(...)):
     point = [[np.radians(lat), np.radians(lon)]]
